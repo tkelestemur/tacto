@@ -69,6 +69,7 @@ class Sensor:
         show_depth=True,
         zrange=0.002,
         cid=0,
+        viewer=False
     ):
         """
 
@@ -81,7 +82,7 @@ class Sensor:
         :param cid: Int
         """
         self.cid = cid
-        self.renderer = Renderer(width, height, background, config_path)
+        self.renderer = Renderer(width, height, background, config_path, viewer)
 
         self.visualize_gui = visualize_gui
         self.show_depth = show_depth

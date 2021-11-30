@@ -27,6 +27,7 @@ import cv2
 import numpy as np
 import pybullet as p
 import pyrender
+from pyrender import viewer
 import trimesh
 from omegaconf import OmegaConf
 from scipy.spatial.transform import Rotation as R
@@ -54,7 +55,7 @@ def euler2matrix(angles=[0, 0, 0], translation=[0, 0, 0], xyz="xyz", degrees=Fal
 
 
 class Renderer:
-    def __init__(self, width, height, background, config_path):
+    def __init__(self, width, height, background, config_path, viewer):
         """
 
         :param width: scalar
@@ -64,7 +65,7 @@ class Renderer:
         """
         self._width = width
         self._height = height
-
+        self.viewer = viewer
         if background is not None:
             self.set_background(background)
         else:
@@ -140,6 +141,8 @@ class Renderer:
         self._init_gel()
         self._init_camera()
         self._init_light()
+        if self.viewer:
+            self._init_viewer()
 
         self.r = pyrender.OffscreenRenderer(self.width, self.height)
 
@@ -369,18 +372,21 @@ class Renderer:
             light_node_depth = pyrender.Node(light=light, matrix=light_pose_0)
             self.scene_depth.add_node(light_node_depth)
 
+    def _init_viewer(self):
+        self.v = pyrender.Viewer(self.scene, run_in_thread=True)
+
     def add_object(
         self, objTrimesh, obj_name, position=[0, 0, 0], orientation=[0, 0, 0]
     ):
         """
         Add object into the scene
         """
-
+        self.v.render_lock.acquire()
         mesh = pyrender.Mesh.from_trimesh(objTrimesh)
         pose = euler2matrix(angles=orientation, translation=position)
         obj_node = pyrender.Node(mesh=mesh, matrix=pose)
         self.scene.add_node(obj_node)
-
+        self.v.render_lock.release()
         self.object_nodes[obj_name] = obj_node
         self.current_object_nodes[obj_name] = obj_node
 
@@ -410,15 +416,17 @@ class Renderer:
         """
         orientation: euler angles
         """
-
+        self.v.render_lock.acquire()
         node = self.object_nodes[obj_name]
         pose = euler2matrix(angles=orientation, translation=position)
         self.scene.set_pose(node, pose=pose)
+        self.v.render_lock.release()
 
     def update_light(self, lightIDList):
         """
         Update the light node based on lightIDList, remove the previous light
         """
+        self.v.render_lock.acquire()
         # Remove previous light nodes
         for node in self.current_light_nodes:
             self.scene.remove_node(node)
@@ -429,6 +437,7 @@ class Renderer:
             light_node = self.light_nodes[i]
             self.scene.add_node(light_node)
             self.current_light_nodes.append(light_node)
+        self.v.render_lock.release()
 
     def _add_noise(self, color):
         """
@@ -492,6 +501,7 @@ class Renderer:
         Currently linear adjustment from force to shift distance
         It can be replaced by non-linear adjustment with calibration from real sensor
         """
+        self.v.render_lock.acquire()
         existing_obj_names = list(self.current_object_nodes.keys())
         for obj_name in existing_obj_names:
             # Remove object from scene if not in contact
@@ -527,6 +537,7 @@ class Renderer:
                 obj_pos = obj_pos + offset * self.max_deformation * direction
 
             self.update_object_pose(obj_name, obj_pos, objOri)
+        self.v.render_lock.release()
 
     def _post_process(self, color, depth, camera_index, noise=True, calibration=True):
         if calibration:
